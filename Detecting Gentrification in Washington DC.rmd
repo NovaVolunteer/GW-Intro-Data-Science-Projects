@@ -1,0 +1,436 @@
+---
+title: "Detecting Gentrification in Washington DC"
+author: "Tidy Insights"
+date: "12/4/2017"
+output:
+  html_document:
+    highlight: pygments
+    theme: united
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+On this project, we will be investigating, detecting and predicting an interesting urban phenomenon. Over the past 50 years or so, some of the nation's biggest metropolitans have experienced a unique change resulted from a set of urban redevelopment and rehabilitation process known as Gentrification.
+
+Gentrification is defined as 'Middle class settlement in renovated or redeveloped properties on older, inner-city districts formerly occupied by lower-income population' (Greogry et al, 2009).Although there are many alternative definitions, most researchers agree that gentrification takes place when socially and economically affluent new settlers move in to rehabilitated and redeveloped low-income neighborhoods(Hammel & Wyly, 1996; Freeman, 2005). The influx of high-income earning residents over time puts pressure on housing prices and living expenses, which leads to poor people to migrate out of their neighborhood. 
+
+The Nation's Capital, Washington D.C. is among the most well known examples of Gentrification. Over the years, the District has been going through unprecedented urban transformation as young, educated and well paid people continue to settle in (Arévalo, et al, 2012). According to a report by the Census Bureau, since the year 2000, DC received at least 100,000 new settlers. The increase, specially, in the population group that is well-off than the existing residents, skyrocketed housing prices. As the result, new settlers began to move into relatively affordable neighborhoods, causing low-income residents to migrate out (Guerrieri etal, 2012).
+
+In addition to several case studies, empirical analysis by Hammel & Wyly (1996, 2001) and other researchers indicate that statistical methods can also be used to study gentrification. On this project, therefore, we made an attempt to empirically detect gentrification in the context of the change in household median income that is associated with the influx of high-income earning residents. 
+
+In order to do so, we built two different kinds of regression models, examined outputs and assessed the relationship between the dependent variable income and explanatory variables. The project is organized in to three parts. In the first, we introduce the data, lay out the null hypothesis, run explanatory data analysis and conduct feature selection. The second part is model building. We started out with Ordinary Least Square regression model and then move to Logistic regression. The third part is for result and summary where we also outlined limitations and potential solutions for future similar projects.
+
+
+### The data
+
+The data for this projected is collected from the Census Bureau. To collect the variables we need, in addition to assessing the features of gentrification we discussed above, we referred to similar works conducted by other researchers (Heidkamp & Lucas, 2013; Arévalo, et al, 2012; Hammel & Wyly, 2001). Although gentrification is taking places in many cities around the place, in our data collection, we take into account the changes in the context of Washington DC.
+
+The variables are: 
+ 
+  Key           |    Description
+--------------- | -------------------------------------
+GEO.id          | Geographic (unique) id
+p_chg_wh        | Percentage change in white population 
+p_chg_bk        | Percentage chagne in black population
+p_chg_edc       | Percentage change in the 25 years old and above with a Bachelors or Higher academic degree (s)
+change_incm     | Change in median household income($) (USD, adjusted to infilation)
+change_hhsval   | Change in median house value ($) (USD, adjusted to infilation)
+change_rent     | Change in gross median rent ($) (USD, adjusted to infiliation)
+p_chg_ownd      | Percentage change in the number of households owned
+p_chg_rented    | Percentage change in the number of households rented
+p_cg_pvt        | Percentage change in the number of people below poverty line
+change_vcri     | Change in the number of Violent Crimes
+p_chg_chfm      | Percentage change in the number of families with children
+chg_md_age      | Change in median age
+
+
+Now, let us load the data in R and explore!
+
+```{r comment = NA, echo = FALSE,  message=FALSE, warning=FALSE}
+library(DT)
+library(ggplot2)
+library(psych)
+library(gridExtra)
+library(rgdal)
+library(sp)
+library(RColorBrewer)
+library(classInt)
+library(tmap)
+library(lmtest)
+library(corrplot)
+library(car)
+library(bestglm)
+library(ResourceSelection)
+library(ROCR)
+library(pROC)
+library(dplyr)
+library(class)
+```
+
+### Description
+
+The total number of observations in our dataset is 179, each representing the exact same number of census tracts in DC. There are also a total of 13 columns. Let's take a look at the first 10 observations and the over all structure of the data.
+
+```{r comment =NA, echo=FALSE}
+setwd("/Users/Eddie/Desktop/Courses/Intro_DS/Assignment/group_project_2")
+gd <- read.csv("gentrification_data.csv", header =TRUE)
+datatable(gd)
+str(gd)
+```
+
+Except for the first column, which is a unique geo-id, the dataset contains values representing the social, economic and demographic factors associated with gentrification. As we shall see later, although all of them are not equally relevant to build our models, our initial data collection included as many predicators as literatures covered. 
+
+## Exploratory Data Analysis
+
+Next,  will run basic descriptive statistics, visualize relationship and detect some patterns in the dataset.
+```{r comment =NA, echo = FALSE} 
+gd_v2<-data.frame(gd[, 2:13]) # Take out the unique Id out of the main data.
+summary(gd_v2) # Expanded summary
+```
+
+In the past 16 years, Washington DC has seen some interesting changes. At a census tract level, the percentage share of white population increased by an average 10% while the share of black population declined by 13.5%. Similarly, the percentage share of educated people went up by, on average, 12.5 % while the share of population below poverty line declined by 2.4 %. The median house value and gross rent amount also increased significantly. Interestingly, the median household income also goes up by, on average, $15,897 U.S. dollars.
+
+
+Let's visualize some the associations in the variables!
+
+```{r comment =NA, echo = FALSE, message = FALSE, warning = FALSE}
+plot1<-ggplot(gd_v2, aes(p_chg_wh, p_chg_bk)) + geom_point( color ="#5ce32d", alpha = 0.9) +theme_bw() +labs ( title ="Demographic Change", x = "Change in White Population (%) ", y = " Change in Black Population (%) ") + theme(legend.position = "none")
+
+plot2<-ggplot(gd_v2, aes(p_chg_edc, change_incm)) + geom_point( color ="#a67ff9", alpha = 0.9) +theme_bw() +labs ( title ="Household Income", x = " Change in Educated (%)  ", y = " Change in Income ($)") + theme(legend.position = "none")
+
+grid.arrange(plot1, plot2, ncol = 2, widths = c(1, 1))
+
+plot3<-ggplot(gd_v2, aes(change_vcri)) + geom_histogram( bins =15, fill ="#adadfe", color ="#ffffff", alpha = 0.9) +theme_bw() +labs ( title ="Violent Crime", x = " Change in the number of incidents", y = " Census Tracts ") + theme(legend.position = "none")
+
+plot4<-ggplot(gd_v2, aes(change_hhsval, change_rent)) + geom_violin(color ="#f35e80", fill ="#f35e80", alpha = 0.9) +theme_bw() +labs ( title ="Housing Price", x = " Change in House Value ($)", y = "Change in Rent ($)") + theme(legend.position = "none")
+
+grid.arrange(plot3, plot4, ncol = 2, widths = c(1,1))
+
+plot5<-ggplot(gd_v2, aes(p_chg_pvt, change_rent)) + geom_boxplot(color ="#a67f9c", alpha = 0.9) +theme_bw() +labs ( title = "Rent", x = " Share of Low income residents (%)  ", y = " Change in rent ($)") + theme(legend.position = "none")
+
+plot6<-ggplot(gd_v2, aes(p_chg_rentd, p_chg_ownd)) + geom_hex( color ="#ffffff", alpha = 0.8) +theme_bw() +labs ( title = "Property Type", x = "Rented Properties (%)  ", y = "Owned Properties (%)") + theme(legend.position = "none")
+
+grid.arrange(plot5, plot6, ncol = 2, widths = c(1, 1))
+
+```
+
+The change in the percentage share of white and black population exhibits a negative association while the change in income and share of educated people tend to positively associated. Most census tracts saw a decline in the number of violent crimes although the district still have high crime rate due theft related incidents. Most places also saw an increase in rent ranging from few hundred dollars to the upper a couple of thousands. The share of low income people also decline as the rent increases. 
+
+### Dependent Variable
+
+Gentrification often takes many forms, depending the location of urban transformation and can be seen from many angles. Most literatures, however, agree that gentrified neighborhoods distinctly can be identified as settlement of high income earning new residents in neighborhoods that were once considered poor and deteriorating (Ellen & Ding, 2016; Hammel & Wyly, 1996; Smith, 1982). Hence, sharp increase in household income in low-income neighborhoods can be explained by factors that can demystify the change. 
+
+The null hypothesis is that there is no statistical significance between income and social, economic and demographic changes of a neighborhood. In line with this hypothesis, we would also like to assess the potential use of statistical methods to study gentrification in dynamic cities such as the District. 
+
+
+### Checking Distribution 
+Before moving on, we would like to check the normality of the distribution of our dependent variable (change in income). In order to do so, we'll examine its distribution, first using a set of four graphical outputs and then by running, Kurtosis, Skewness and Shapiro Wilk Tests.
+ 
+
+```{r comment =NA, echo = FALSE,  message=FALSE, warning=FALSE} 
+par(mfrow=c(2,2))
+Income_change <-gd_v2$change_incm
+plot(Income_change, main = "Scatter Plot")
+hist(Income_change, main = "Histogram")
+plot(density(Income_change), main ="Denisty")
+qqnorm(Income_change) 
+qqline(Income_change, col = "red")
+invisible(dev.off())
+```
+Accordingly, the change in income is slightly right-tailed. In the scatter plot, some extreme values are also visible. The QQ-Plot also indicates a distribution that deviates from normal.
+
+```{r comment =NA, echo = FALSE,  message= FALSE, warning= FALSE}
+shapiro.test(Income_change)
+Skewness<-skew(Income_change)
+Kurtosis<-kurtosi(Income_change)
+data.frame(Skewness, Kurtosis)
+```
+
+Additional diagnosis using Shapiro-Wilk test indicates the null hypothesis is rejected, indicating that the variable is not normally distributed. The Skewness and Kurtosis also shows that the distribution of our dependent variable is skewed and tailed to the right. We shall also later see how the residuals from the OLS model behave and decide conclusively whether the distribution is truly skewed or not.
+
+### Independent Variables
+
+Now that we have examined the distribution of dependent variable, let us, first, see the relationship within the dependent variables and, then, select the best predicators of income among them. 
+
+### Multicollinearity
+
+One of the underlying assumptions of an Ordinary Least Square regression is that there is no multicollinearity among the predicator variables. In other words, we don't want our independent variables to have high to moderate correlation. If correlations exist, we shall use the Variance Inflation Factor (VIF) test and identify the multicollinear variables we may need to exclude from our model. 
+```{r comment=NA, echo=FALSE}
+
+cor.gd_sub<-cor(gd_v2)
+corrplot(cor.gd_sub, method ="number")
+
+```
+ 
+It looks like that there are some highly correlated variables. In running VIF test, we can detect by how much variance of the coefficient generated from the model is increased because of collinearity. Just to give you a head up, the VIF test in R is found in the __car__ library.
+
+```{r comment=NA, echo =FALSE}
+value<-lm(change_incm~., data =gd_v2)
+data.frame(vif(value))
+
+```
+
+In this case, at least three of our variables showing a VIF value greater than 4 are either moderately or highly multicollinear (i.e., the change in the percentage share of white population, black population, educated people) Before deciding to hastily exclude any variables from our analysis, let us see which subset of might actually be a good predicator.
+
+### Feature Selection
+
+The multicollinearity we detect could be due to the presence of redundant or irrelevant variables and this can be detected through Feature (Variable) selection. By selecting a subset of predicators, we can eliminate redundant variables that might other wise cause over fitting and biased estimate.
+
+
+```{r comment=NA, echo =FALSE}
+par(mfrow=c(1:2))
+library(leaps)
+reg.best <- regsubsets(change_incm~., data = gd_v2, nvmax = 19)
+plot(reg.best, scale = "adjr2", main = "Adjusted R^2")
+plot(reg.best, scale = "bic", main = "BIC")
+
+```
+
+Based on the Bayesian Information Criterion (BIC),a subsets of our dataset has a much higher value to our model than others. This subset include changes in the values of white population, rent, house value, educated, and low-income people. We also can look into the R-square values and gather the same information.For our purpose, we'll regress change in rent (change_rent), poverty (p_chg_pvt) and education (p_chg_pvt) on change in median household income (change_incm).
+
+## OLS Regression Model
+We will begin with the Oridianary Least Square (OLS) regression model and to see if the estimates hold true to the assumptions of a linear regression model.
+
+```{r comment=NA, echo =FALSE}
+
+sub_data<-gd_v2[, c(4,3,6,9)]
+
+model1<-lm(change_incm~change_rent+p_chg_edc+p_chg_pvt, data = sub_data)
+summary(model1)
+```
+
+As you can see from the p value of each the variables we chose, changes assocated with rent, education, poverty and are statistically signficant to the change in income. The model also has relatively high R-square indicating that these variables can potentially explain the variation income. Before moving into accepting the validity of this model, let's examine the residuals. 
+
+### Residuals
+W'll first look into their over all pattern and check for Heteroscedastacity using the Breusch–Pagan test.
+
+```{r comment=NA, echo =FALSE}
+par(mfrow=c(1,4))
+plot(model1, which = 1:4)
+invisible(dev.off())
+```
+
+Some of the observations in our data seem to skew the over all distribution of the residuals. Interestingly, the Cook's Distance shows  the U-Street Corridor (64) and the Navy-Yard (91) neighborhoods have higher deviation from the rest. Since these two neighbrhoods went through rapid urban transformation in the last 20 years or so, their deviation explain a high level of gentrification.
+
+Let's now test for Heteroscedastacity and assess the statistical signficance of the distribution of the residuals. In order to do so, we will use the Breusch–Pagan test
+
+
+```{r comment = NA, echo= FALSE}
+bptest(model1, data=sub_data, studentize=FALSE)
+
+```
+
+The result suggests that we should reject the null hypothesis of of homoscedastacity. Since this will invalidate our model, few potentials solutions might help us correct the issue better further. 
+
+  1) Remove or impute the those highly deviating observations. This solution, however, might lead us to misleading estimates because those neighbrhoods are theoretically signficant to our understanding of gentrification in Washington DC.
+  
+  2) Fit the data using a different modeling technqiues. We chose to go this route to see if other modeling technique, more specifically the logistic regression could help us detect the change in income better.In Regional and econometric studies, an alternative technique known as the General IV/GMM model is also used. Since this modeling technique is beyond the scope of this course, we'll test and see if 'Logistic Regression' will do the majic.
+
+## K-Nearest Neighbor 
+
+Our second approach is to use K-Nearest Neighbor algorithm and attempt to detect gentrification. First, will see the chance of correctly orrectly classifying the neighborhoods based on income. 
+
+```{r comment =NA, echo = FALSE,  message= FALSE, warning= FALSE}
+knn_data<-sub_data
+table(knn_data$`change_incm`)[177] / sum(table(knn_data$`change_incm`))
+
+```
+Accordingly, we have 5.5 % chance of classifying correctly. Its exteremely low but would like to see if KNN will do a better job. First, we have to split our data in to training and testing groups. W'll use the 80% of our dataset for training and 20% of it for testing the KNN algorithms.
+```{r comment =NA, echo = TRUE,  message= FALSE, warning= FALSE}
+set.seed(1)
+data_train_rows = sample(1:nrow(knn_data),
+                              round(0.8 * nrow(knn_data), 0),  
+                              replace = FALSE)       
+
+data_train = gd_v2[data_train_rows, ]
+data_test = gd_v2[-data_train_rows, ]  
+
+Training_data<-nrow(data_train)
+Testing_data<-nrow(data_test)
+
+data.frame(Training_data, Testing_data)
+```
+
+Accordingly, 143 out of the 179 observations will be used to train the data while the remaining 36 observation will be used for testing.
+
+### Classifying using the data
+
+We shall now use the algorithm to classify the neighbrhoods. Later on, we will compare the calssification result to the true class using cofusion matrix.
+
+```{r comment =NA, echo = TRUE,  message= FALSE, warning= FALSE}
+
+set.seed(1)
+bank_3NN = knn(train = data_train[, c("p_chg_edc", "p_chg_pvt", "change_rent")],  
+               test = data_test[, c("p_chg_edc", "p_chg_pvt", "change_rent")],    
+               cl = data_train[, "change_incm"],                       
+               k = 5,                                                       
+               use.all = TRUE)                                
+
+kNN_res = table(bank_3NN,
+                data_test$`change_incm`)
+kNN_acc = sum(kNN_res[row(kNN_res) == col(kNN_res)]) / sum(kNN_res)
+kNN_acc
+```
+
+As it turn out the data we fitted into algorithm is not likely to be classified using KNN. Our next decision is to test and fit the data using Logistic regression modelling technique.
+
+## Logistic Regression Model
+
+In simple term, Logistic regression model can be understood as an estimate of the probability of an outcome. Now that we know that some neighbrhoods exhibit a sharp difference from the other, in the Logistic Regression, we want to identify which neighbrhoods have seen a sharp increase compared to the others. 
+
+### Modifying dataset
+The first task is to create a factor variable that categorizes income into different groups. We'll begin by look at the quantile distribution of income.
+
+```{r comment =NA, echo = FALSE,  message= FALSE, warning= FALSE}
+quantile(gd$change_incm)
+```
+75% of the census tracts saw a decline or slight change compared to the other 25 % of the observations showing sharp increase. Let's divide this variable between those showing a decline or slight to moderate increase (low) and those showing sharp increase (high). We will use the 75% as a break point.
+
+```{r comment =NA, echo = FALSE,  message= FALSE, warning= FALSE}
+gentrification<-gd
+gentrification$income_class <- cut(gd$change_incm, c(-40000,31857,100000), labels=c("low","high"))
+
+colnames(gentrification) <- c('GEO.id', 'p_chg_wh', 'p_chg_bk', 'p_chg_edc', 'change_incm', 'change_hhsval', 'change_rent', 'p_chg_ownd', 'p_chg_rentd', 'p_chg_pvt', 'change_vcri', 'p_chg_chfm','ch_md_age','y')
+
+gentrification <- gentrification[, c('p_chg_wh', 'p_chg_bk', 'p_chg_edc', 'change_hhsval', 'change_rent', 'p_chg_ownd', 'p_chg_rentd', 'p_chg_pvt', 'change_vcri', 'p_chg_chfm','ch_md_age','y')]
+head(gentrification)
+```
+
+Accordingly 90 census tracts show sharp increase. Before moving on, we need to make sure that this new categorical variable is recongized as a factor variable.
+
+```{r comment =NA, echo = FALSE,  message= FALSE, warning= FALSE}
+str(gentrification)
+
+```
+
+### Best GLM technique
+
+We will first start with a logistic regression approach that selects and identifies a subset of inputs showing the smallest deviance. The following result shows us the difference in the different AIC levels of all the different model possibilities.
+
+```{r comment =NA, echo = FALSE,  message= FALSE, warning= FALSE }
+
+income.bglm <- bestglm(Xy=gentrification,family = binomial,IC="AIC",method = "exhaustive")
+summary(income.bglm$BestModel)
+
+exp(coef(income.bglm$BestModel))
+
+```
+The next test we would like to do is the Hosmer Lemeshow goodness of fit test. This evaluation instrument in line with others is helpful to examine whether or not the observed event rates match expected event rates in subgroups of the model population.
+
+```{r comment =NA, echo = FALSE,  message= FALSE, warning= FALSE }
+hoslem.test(gentrification$y, fitted(income.bglm$BestModel))
+
+```
+
+Our next task will focus on finding the probabilities for each response, calculate teh hit rate and plot the ROC curve.
+
+```{comment =NA, echo =TRUE}
+income.prob.final<-predict(income.bglm$BestModel, type = c("response"))
+View(income.prob.final)
+income.hit.final <- roc(y~income.prob.final, data=gentrification)
+income.hit.final
+plot(income.hit.final)
+
+
+```
+
+With the information about the best glm, we're going to try if we can partition the data successfully and test our model. This time we will also only the variables with known to have signficance to the estimates.
+
+```{r comment =NA,echo = TRUE,  message= FALSE, warning= FALSE}
+train.income.final <- gentrification[1:125,]
+test.income.final <- gentrification[126:179,]
+
+income.model.final<-glm(y~p_chg_wh+change_rent+p_chg_rentd+p_chg_pvt+p_chg_chfm, family = binomial(link="logit"), train.income.final)
+summary(income.model.final)
+```
+
+To generate the coffients we'll run the following code as well.
+
+```{r comment =NA,echo = TRUE,  message= FALSE, warning= FALSE}
+income.output.final <- exp(coef(income.model.final))
+income.output.final
+
+```
+
+### Prediction
+
+Now we have a sense of our model, we'll use the regression model and predict the probability values. These values are the chances of outcome for each of the census tracts to either be of higher or lower income change.
+
+```{r comment =NA,echo = FALSE,  message= FALSE, warning= FALSE}
+pred.income.final <-predict.glm(income.model.final,test.income.final,type='response')
+contrasts(gentrification$y)
+pred.income.final2 <- ifelse(pred.income.final > 0.5,1,0)
+head(pred.income.final2)
+
+test.income.final %>% group_by(y) %>%
+  summarise(no_rows = length(y))
+
+head(test.income.final$y)
+income.pred.hit.final2 <- mean(pred.income.final2!=as.numeric(test.income.final$y))
+income.pred.hit.final2
+
+newpred.income.final <- prediction(pred.income.final,test.income.final$y)
+newpred.income.performance.final <- performance(newpred.income.final, measure = "tpr",x.measure = "fpr")
+plot(newpred.income.performance.final)
+AUC.final <- performance(newpred.income.final, measure = "auc")
+AUC.final
+```
+
+The AUC performance value indicates that the number of observations we have for our data is making it difficult for us to cross validate our model. However, the model over all has done workable progress and further researches can improve up on these findings and develop a model that performs well.
+
+
+## Summary and Conclusion
+ 
+On this project, we attempted to detect gentrification in Washington DC by using emprical analysis. There are mulitple evidences of Gentrification and our goal was to leverage statistical tools and assess its over all pattern. Some of our findings can be summerized as:
+
+1) Over all, our analysis indicates that regression modeling techniques are indeed useful to study the gentrification. This a very important finding in that our attempt addresses the criticism against studies on gentrification for lacking macro-scale emperical analysis. The modeling techniques we used clearly show their relevance in any future research in this topic.
+
+
+2) The OLS regression model didn't gave us reliable estimates and because of the difference in the scale of changes we saw in Washington DC, the residuals failed to show normal distribution. However, by introducing other modeling techniques such as the Two Stage Least Square (2SLS), the General Moment of Methods (GMM), instrumental variables, this linear regression technique can be improved to yield better result.   
+
+3) We also detected statistically signficant relationship between the change in household income and explantory variables that include changes in share of people with higher education, the share of people living under poverty line and the change in gross amount of median rent. 
+
+4) We didn't manage to cross-validate the outputs of the logistic regression model because the number of observation's we use is relatively small. As a result, we recommend that future emperical studies on small cities such as the District should use values at a census blocks rather than census tracts. 
+
+In summary, our attempt to study and detect gentrification in Washington DC through the various attributes and features associated with the change has proven that further research in this area will help us understand the pattern better.  
+
+
+-------------------------------------------------------------------------------------
+
+References
+
+Arévalo, J. C, Pető, B., Suaya, A. & Mann, L. M. (2012). Demographic changes and gentrification in Washington DC between 2000 and 2010. _Papers of the Applied Geography Conferences._ 
+
+Ellen, I. & Ding, L. (2016). Advancing our understanding of Gentrification. _Cityscape_: A Journal of Policy Development and Research 18:3, 1-8.
+
+
+Freeman, L. (2005). Displacement or Succession? Residential Mobility in Gentrifying Neighborhoods. _Urban Affairs Review_, 40:4, 463-491
+
+Guerrieri, V., Hartley, D, & Hurst, E.(2010). Endogenous Gentrification and housing price dynamics. _National Bureau of Economic Research_. Working Paper 16237. Retrived from: http://www.nber.org/papers/w16237, on Sun, 19 Nov 2017 18:59:21 UTC
+
+Gregory, D. Johnston, R. Pratt, G. Watts, M. Whatmore, S. (2009). _The Dictionary of Human Geography_. Hoboken, NJ: Wiley-Blackwell.
+
+Hammel, D. J., and Wyly. K. E.(1996). A model for identifying gentrified areas with census data. _Urban Geography_ 17 (3): 248-68.
+
+Hammel, D. J., and Wyly. K. E.(1996). Modeling in the context and contengency of Gentrification. _Urban Affairs_ 20(3): 303-326.
+
+Heidkamp, C. P. & Lucas, S. (2006) Finding the Gentrification Frontier Using Census Data: The Case of Portland, Maine. _Urban Geography_, 27:2, 101-125, DOI: 10.2747/0272-3638.27.2.101
+
+Smith, N. (1982). Gentrification and Uneven Development. _Economic Geography_ 58(2) 139-155.
+
+
+-------------------------------------------------------------------------------------------------------------
+
+
+@Tidy Inisghts <br/>
+Introduction to Data Science <br/>
+The George Washington University <br/>
+Dec-2017

@@ -1,0 +1,219 @@
+We found the data about human resource on kaggle website and want to use logistic regression to see what element can affect staff turnover. Our S.M.A.R.T. question is "What factors play a role in employee departure and what are their impacts?". Notice: the dataset is simulated. This document is puclished to RPubs(http://rpubs.com/lewk/gwu-hrdata-1)
+---
+title: "Who left? HR Data Prediction"
+author: "Luke Bogacz and Zheng Lyu"
+date: "June 21, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+ We found the data about human resource on kaggle website and want to use logistic regression to see what element can affect staff turnover. Our S.M.A.R.T. question is "What factors play a role in employee departure and what are their impacts?". Notice: the dataset is simulated. This document is puclished to RPubs(http://rpubs.com/lewk/gwu-hrdata-1).
+
+ First, we checked there is no NAs and then we begin to check the normality and type of variables.
+```{r, echo = FALSE, include = FALSE}
+library(dplyr)
+library(corrplot)
+library(psych)
+library(bestglm)
+library(leaps)
+library(pROC)
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+reclassToFactor <- function(col){
+  # if there are 2  unique items in col - then set type to factor
+  unq <-unique(col)
+  if (length(unq) == 2){
+    return (factor(col, levels = 0:1, labels=unq))
+  } 
+    return(col)
+}
+?factor
+```
+
+```{r,  echo = FALSE,  warning = FALSE, message = FALSE}
+filterByGoodCoef <- function(cf.list, df, otherColumns) {
+  df[, names(df) %in% as.vector(bind(otherColumns, names(cf.list)))]
+}
+```
+
+```{r,  echo = FALSE,  warning = FALSE, message = FALSE}
+# function used to put the dependent variable at the end of the df, and change its name to "y"
+# this is in order to use the output df as input for bestglm() function
+putDependentAtEnd <- function(df, dep){
+  indx <- grep(dep, names(df))
+  colnames(df)[indx] <- "y"
+  df[, c((1:ncol(df))[-indx], indx)]
+}
+```
+
+ Read in the HR dataset, reclassify any possible factor variables to factors (if missed on ingest), and ensure dependent binomial variable (`left`) is numeric type.
+
+Correlation plot is also made to see the initial correlation between variables.From the plot, we can see that the variable "satisfction_level" has the highest correlation with "left", while it is only -0.35, which is a moderate correlation. From correlation between independent variables, we can see that there is no multicolinearity in the dataset.
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+hr <- data.frame(read.csv('HR_Data.csv', header=TRUE))
+str(hr)
+
+hr.new <- data.frame(lapply(hr, reclassToFactor))
+str(hr.new)
+hr.new$left <- as.numeric(as.character(hr.new$left))
+str(hr.new)
+hist(hr.new$last_evaluation)
+# create a numeric only subset dataframe for use in correlations and other tests
+hr.new.numOnly <- hr.new[, sapply(hr.new, is.numeric)]
+```
+
+ run histograms and describe on the numeric variables to determine normality
+From the plot, we can see that the skew problem is not serious.
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+library(ggplot2)
+library(reshape2)
+ggplot(data = melt(hr.new.numOnly), mapping = aes(x = value)) + 
+    geom_histogram(bins = 10) + facet_wrap(~variable, scales = 'free_x')
+
+sapply(hr.new.numOnly, describe)
+```
+
+ Create training and testing datasets, and run correlation against variables (with factors coerced into Numeric)
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+train <-hr.new[1: 12000, ]
+test <- hr.new[12001: nrow(hr.new), ]
+
+train.numOnly <- train[, sapply(train, is.numeric)]
+train.asNum <- sapply(train, as.numeric)
+
+str(train)
+train.cor <- cor(train.asNum)
+corrplot::corrplot(train.cor , type = "lower", method = "number", tl.srt = 35)
+```
+
+ Create logistic regression model using all variables to gain understanding of variable interaction on the dependent (`left`)
+
+*Looking at the p values in the model using every variable, each variable seems to contribute to the model*
+
+**NOTES: `satisfaction_level` seems to output a strange coefficient of -4, additionally `average_montly_hours` and `time_spend_company` have almost a negligable affect on the depenedent**
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+m.all <- glm(left~., family =binomial(link ="logit"), data = train)
+summary(m.all)
+```
+
+ use "bestglm()" with forward selection method to determine the best possible model for use.
+The best model shows that the higher the satisfaction level the less possible the staff will leave, also staff who has higher number of project, exprience of work accident and has been promoted in last 5 years may have higher chance to stay in the company. While, staff who has higher "last evaluation", average monthly hours spend in company, years spend in company and low to medium salary may have higher chance to leave the company.
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+# revese the dataframe dependent variable, and rename to "y"
+train.rev <- putDependentAtEnd(train, "left")
+# str(train.rev)
+
+best.model <- bestglm(Xy=train.rev, family=binomial, IC = "AIC", method="forward")
+bglm <- best.model$BestModel
+summary(bglm)
+```
+
+
+ compare the bestglm model (`bglm`) against the all variable model (`m.all`) using all the variables using `roc()`
+
+The AUC of all variable model is 79.5% while the AUC of the best model is 82.5%. Also, the AIC is decreased from 8640 to 8638.
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+best.pred <- predict.glm(bglm, test, type="response")
+best.pred.predictions <- ifelse(best.pred > 0.5,1,0)
+
+all.pred <- predict.glm(m.all, test, type="response")
+all.pred.predictions <- ifelse(all.pred > 0.5,1,0)
+
+best.r <-roc(left~best.pred, data=test)
+best.r
+plot(best.r)
+
+all.r <- roc(left~all.pred, data = test)
+all.r
+plot(all.r)
+
+summary(m.all)$aic
+summary(bglm)$aic
+anova(bglm, m.all)
+
+library(pscl)
+pR2(m.all)
+
+
+m.all.cf <- (exp(coef(m.all)) - 1) * 100
+bglm.cf <- (exp(coef(bglm)) - 1) * 100
+m.all.cf
+bglm.cf
+
+best.hits <- mean(best.pred.predictions!=test$left)
+m.all.hits <- mean(all.pred.predictions!=test$left)
+best.hits
+m.all.hits
+# write.csv(m.all.cf, "model_all_cf.csv")
+# write.csv(bglm.cf, "best_cf.csv")
+```
+
+
+Transform `satisfaction_level` and `last_evaluation` into factor level variables as they can be repsented by 3 level factors (1,2,3)
+
+This time, the best regression shows that staff who has higher satisfaction level, more projects, experience of work accident, and promoted in last five years may have higher chance to stay in the company. However, if a staff has more average monthly hours, time spend in company and low or medium salary may have higher chance to leave the company. The result is almost the same as the former best regrssion.
+
+In doing so, this actually raised the AIC of the models, including the newly run `bestglm()` model, which indicates we lost some prediction power. AUC went down to 77% and AIC increased to 8966 when using this transformed dataframe.
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+transforDataFrame <- function(oldDF){
+  # used .3 and 0.7 as cutoffs based on the histogram representations of the variables, each showed somewhat distinct breakout points at these levels
+  df <- oldDF
+  df[df$satisfaction_level>0.7,]$satisfaction_level <- 3
+  df[df$satisfaction_level<0.3,]$satisfaction_level <- 1
+  df[df$satisfaction_level<1,]$satisfaction_level <- 2
+  df$satisfaction_level
+  df$satisfaction_level <- as.factor(df$satisfaction_level)
+  
+  df[df$last_evaluation>0.6,]$last_evaluation <- 3
+  df[df$last_evaluation<0.45,]$last_evaluation <- 1
+  df[df$last_evaluation<1,]$last_evaluation <- 2
+  df$last_evaluation
+  df$last_evaluation <- as.factor(df$last_evaluation)
+  return(df)
+}
+
+df.trans <- transforDataFrame(hr.new)
+
+trans.train <- df.trans[1: 12000, ]
+trans.test <- df.trans[12001: nrow(df.trans), ]
+
+m.train.all <- glm(left~., family =binomial(link ="logit"), data = trans.train)
+summary(m.train.all)
+
+trans.train.rev <- putDependentAtEnd(trans.train, "left")
+best.trans <- bestglm(Xy=trans.train.rev, family=binomial, IC = "AIC", method="forward")
+best.trans <- best.trans$BestModel
+summary(best.trans)
+
+summary(best.trans)$aic
+summary(m.train.all)$aic
+
+
+best.trans.pred <- predict.glm(best.trans, trans.test, type="response")
+best.trans.pred.predictions <- ifelse(best.trans.pred > 0.5,1,0)
+
+best.trans.r <- roc(left~best.trans.pred, data = trans.test)
+best.trans.r
+plot(best.trans.r)
+
+best.trans.hits <- mean(best.trans.pred.predictions!=test$left)
+best.trans.hits
+
+pR2(m.train.all)
+```
+
+So, we still think that the former best model we made is better and here are some conclusions we made.
+1.Staff are 500% more likely to quit if they have a low salary, 200% more likely to quit if they have a medium salary. This means salary is an important factor that affect people's decision.
+2.Staff are 80% more likely to quit if they have a good last evaluation.
+3.Staff are 100% less likely to quit if they are satisfied.
+
+Since the salary is significant to the decision of whether left, we consider that if we have nemeric values of salary, the prediction would be better.Also, investigate evaluations can help, as they seem to play a part in people leaving.
+
+Looked into other models on Kaggle, similar results are found there.
+
+
